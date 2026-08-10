@@ -2,6 +2,8 @@
 
 > 所有测试均为对 StepFun Step Plan 官方通道（`https://api.stepfun.com/step_plan/v1`，OpenAI Chat Completions 协议）的黑盒实测。`advisor 命中` = 响应文本中出现 `[Advisor consultation` 块。
 
+> 名词速查：**Step Plan** = StepFun 订阅套餐通道；**step-router-v1** = 自动分发器模型；**advisor** = 路由器内部对 deepseek-v4-pro 的称呼（真咨询 = pro 完整干活，走形式 = 象征性调用）。详见 [how-it-works.md](how-it-works.md) 名词表。
+
 ## 1. 强制手段穷举（全部实测）
 
 | # | 方法 | 结果 | 结论 |

@@ -2,6 +2,23 @@
 
 > 本文基于对 StepFun Step Plan 通道（`https://api.stepfun.com/step_plan/v1`）的黑盒实测反向推断，不代表官方实现细节。
 
+## 名词表（快速入门）
+
+| 名词 | 含义 |
+|---|---|
+| **StepFun（阶跃星辰）** | 中国 AI 公司，提供大模型 API 服务 |
+| **Step Plan** | StepFun 的订阅套餐，通过专属通道 `api.stepfun.com/step_plan/v1` 以远低于按量计费的价格调用模型 |
+| **step-router-v1** | Step Plan 通道的智能路由模型。本身不干活，按任务复杂度把请求自动分发给底层引擎（见下方两张表） |
+| **deepseek-v4-pro** | 路由目标之一：复杂推理、长链路 Agent 决策引擎。1M 上下文，**生产级质量**，对应本项目的 advisor |
+| **step-3.7-flash / step-3.5-flash** | 路由目标之二：高频、结构化执行引擎。快、便宜，是默认承载（绝大多数请求走它），幻觉率相对更高 |
+| **advisor（顾问）** | 路由器内部对 deepseek-v4-pro 的称呼。路由器以"调用 advisor 函数"的形式咨询 pro 引擎，并在响应中留下 `[Advisor consultation]` 块 |
+| **真咨询 (full)** | advisor 被完整调用，pro 的专家分析真实进入响应（有实质内容） |
+| **走形式 (symbolic)** | advisor 被象征性调用，只输出 `advice_type=starting_out` 模板，pro 没真干活 |
+| **双通道注入** | 本项目核心手法：在 system 与用户消息末尾各注入一条强制咨询指令，把路由器的咨询决定往 advisor 推 |
+| **触发率** | 请求触发 advisor 调用的比例。概率性，无法 100% |
+
+**一句话：Step Plan = 便宜的订阅套餐；step-router-v1 = 自动分发器；advisor = 分发器背后的 pro 引擎；本项目 = 让分发器在实质任务上把活交给 advisor。**
+
 ## 1. 路由器是一个 LLM 决策器
 
 `step-router-v1` 不是静态转发规则，而是一个**小模型**。它每一轮请求都做同一个决策：读完整输入（system + messages + tools），然后生成下一段文本。而这"下一段文本"只有两种形态：

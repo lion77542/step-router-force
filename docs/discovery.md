@@ -2,6 +2,8 @@
 
 > 这是本项目最有价值的部分——**为什么"advisor 就是 pro"这个结论不是显而易见的，以及我们是怎么一步步发现并验证的**。完整证据链见 [experiments.md](experiments.md)。
 
+> 名词速查：**Step Plan** = StepFun 订阅套餐通道；**step-router-v1** = 自动分发器模型（把请求分给 pro 或 flash）；**advisor** = 路由器内部对 deepseek-v4-pro 的称呼。详见 [how-it-works.md](how-it-works.md) 名词表。
+
 ## 起点：为什么路由不到 pro？
 
 用户使用 Claude Code + StepFun Step Plan（`step-router-v1`）时发现：写了大量提示词要求"使用 DeepSeek V4 Pro"，但实际输出质量始终不像 pro。官方文档只说"自动调度"，没有公开路由规则。**提示词无效**——因为用户以为路由判定读"提示词内容"，实际上路由器读的是"请求特征 + 显式指令"。

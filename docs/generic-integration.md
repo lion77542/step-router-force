@@ -2,6 +2,8 @@
 
 **核心原理与 Claude Code 无关**：step-router-v1 是个 LLM 决策器，任何能把"强制咨询指令"送进请求的客户端或中转站，都能受益。这里给出三种典型接入方式。
 
+> 名词速查：**Step Plan** = StepFun 订阅套餐通道；**step-router-v1** = 自动分发器模型；**advisor** = 路由器内部对 deepseek-v4-pro 的称呼；**双通道** = system + 用户消息各一条强制指令（实测 5/5）。详见 [how-it-works.md](how-it-works.md) 名词表。
+
 ## 方式 1：直接调 API（curl / 任何 SDK）
 
 OpenAI Chat Completions 协议（**实测：OpenAI 格式的路由器更吃指令，优于 Anthropic 原生格式**）：
