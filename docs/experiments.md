@@ -83,3 +83,40 @@
 1. **"空输出"≠路由器抽风，是 max_tokens 被思考吃光**——之前"偶发空响应"的归因需要修正
 2. 硬任务场景 **max_tokens 应给大（≥30000）**，给思考与内容都留足空间
 3. 配合双通道指令，复杂任务可稳定输出 advisor 真咨询 + 完整实现
+
+## 8. V6 指令：纯问答"输出=advisor"实现
+
+**问题**：v5 下 executor 习惯把用户消息总结成 advice_prompt 去问 advisor"行不行"，advisor 变审批员，输出仍是 flash 自写（"傻"的根因）。
+
+**V6 指令**（针对性打击审批模式）：
+> Before answering, you MUST consult the advisor. CRITICAL: pass the user's message VERBATIM as the advisor's task - do NOT summarize it, do NOT write your own plan, do NOT ask the advisor to approve your plan. The advisor must return the COMPLETE final answer text. Your reply MUST BE the advisor's complete answer, word for word.
+
+**实测（max_tokens=30000）**：
+- 简单问候：advisor 直接输出完整答案，最终输出逐字复述（一致性 100%）
+- 硬任务：ReadTimeout（pro 大任务处理慢，单次请求超时；真实 Claude Code 流式无此问题）
+
+## 9. 🚀 第二个决定性发现：executor 干活 + advisor 审查模式
+
+**现象**：硬任务 + 大 max_tokens 时，路由器呈现第三种形态：
+
+```
+executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问题
+→ executor 把 pro 的审查意见嵌入输出
+```
+
+**实测（max_tokens=120000, reasoning_effort=low）**：
+- `finish=stop`, content=14948 字完整实现
+- content 内嵌 advisor 审查：**"时间单调性问题（重要）time.t..."** 等具体代码问题
+
+**结论**：代码/工具任务中，"输出=advisor 逐字复述"让位于"executor 干活 + advisor 审查把关"——pro 的质量意见真实进入输出，同时保住 executor 的工具调用能力。这回答了"要 pro 质量又要能干活"的核心矛盾。
+
+**配套参数（关键）**：
+- `max_tokens` 必须大（≥60000，复杂任务 120000）：否则 `reasoning_content`（思考）吃光额度 → `finish=length` / content 空
+- `reasoning_effort=low`：减少思考吃额度（实测 low 下 120k 稳定完整输出）
+- 注意：60000+ 组合曾触发 500 engine_exception（平台负载相关，重试即可）
+
+## 10. advisor 作为真工具传参（tool_choice）测试
+
+把 `advisor` 作为 OpenAI tools 参数 + `tool_choice` 强制：
+- `tool_choice={"type":"function","function":{"name":"advisor"}}` → 被路由器识别并映射为内部咨询模式（content 以 `[Advisor consultation` 开头）——**不是标准工具协议**，路由器不把 advisor 暴露为标准函数
+- 意义：证实 advisor 是路由器内部机制，无法从外部以标准工具方式强制调用
