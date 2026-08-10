@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""step-router-force: Claude Code UserPromptSubmit hook (v6)
+"""step-router-force: Claude Code UserPromptSubmit hook (v7)
 
 仅在 stepfun 供应商(step-router-v1)激活时, 在用户消息末尾附加强制
-"真咨询"指令, 让 step-router-v1 高概率调用 advisor(deepseek-v4-pro)。
-其他供应商(OpenCode Go / DeepSeek 直连等)原样放行, 零影响。
+"真咨询"指令。其他供应商原样放行, 零影响。
 
-v6 指令 = 禁止 executor 总结/自写计划/问审批; 必须逐字传完整任务给
-advisor, 并逐字采用 advisor 的完整答案 (实测纯问答输出=advisor)。
+v7 指令 (最终版):
+- 纯输出任务: advisor 出完整答案, 逐字采用
+- 工具/代码任务: 先 advisor 完整方案, 再用工具执行 (关键: 逐字约束
+  只对纯输出, 否则路由器判定"要调工具没法逐字"而放弃 advisor -
+  实测 v6 纯逐字版工具任务 0 触发)
 
-配套参数 (实测关键):
-- max_tokens 必须大 (>=60000), 否则 reasoning_content 思考吃光额度
-  → finish=length / content 为空 (见 docs/experiments.md 第7节)
-- reasoning_effort=low 减少思考吃额度
+配套参数:
+- max_tokens >= 60000, 否则 reasoning_content 思考吃光额度
+- 默认 temperature 即可 (实测 3/3 advisor+tool_calls)
 
-安全设计:
-- 编码: ensure_ascii=True, 任何平台/任何语言都不会崩
-- 幂等: 消息里已有 [ROUTER DIRECTIVE] 就不重复附加
-- 容错: 任何异常都原样放行, 绝不阻塞用户
-- 日志: 每次触发写入 hook.log
+安全: ensure_ascii / 幂等 / 容错 / 日志
 """
 
 import sys
@@ -33,7 +30,8 @@ FORCE = (
     "summarize it, do NOT write your own plan, do NOT ask the advisor to approve "
     "your plan. The advisor must return the COMPLETE final answer text. "
     "Your reply MUST BE the advisor's complete answer, word for word. "
-    "If the advisor only gives you advice, ask it again for the complete answer."
+    "If the task requires writing code or files, first get the advisor's complete "
+    "solution, then write the files using your tools."
 )
 
 LOG_PATH = Path(os.environ.get(
