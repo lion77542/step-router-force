@@ -118,7 +118,8 @@ hook 扫描 `ANTHROPIC*` / `CLAUDE_CODE*` 环境变量自动判断：
 ## 已知边界
 
 - 触发率概率性（双通道小样本 5/5；真实流量含短消息，整体低于此）
-- 偶发空响应/短响应：重发即可
+- **"空输出/短输出"的真相**：step-router-v1 响应含 `reasoning_content`（思考）与 `content`（最终输出）两个字段。**当 max_tokens 过小时思考先吃光额度，导致 content 为空**（`finish_reason=length`）。实测 `max_tokens=30000+` 时复杂任务稳定输出完整内容（见 [docs/experiments.md](docs/experiments.md) 第 7 节）
+- **对策**：确保请求的 max_tokens ≥ 30000。Claude Code 直连时会自动发大值；若用中转/代理，请显式设置
 - 命中 pro 消耗更多 plan 额度
 
 ## 参与维护
