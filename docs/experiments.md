@@ -120,3 +120,28 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 把 `advisor` 作为 OpenAI tools 参数 + `tool_choice` 强制：
 - `tool_choice={"type":"function","function":{"name":"advisor"}}` → 被路由器识别并映射为内部咨询模式（content 以 `[Advisor consultation` 开头）——**不是标准工具协议**，路由器不把 advisor 暴露为标准函数
 - 意义：证实 advisor 是路由器内部机制，无法从外部以标准工具方式强制调用
+
+## 11. ✅ 最终方案：V6 + 大 max_tokens = 稳定 3/3（无需 temperature=0）
+
+**背景**：用户不接受 temperature=0（可能影响其他场景/有其他顾虑），要求不设 0 也要"拿下"。
+
+**few-shot 示范注入实验**（把"已调用 advisor"的完整对话放 system 当示例）：
+- 结果：advisor 触发 ✅，但最终输出只剩 134 字（只吐出 `<tool_call>` 标签）——**示范注入干扰了输出，反而不如纯指令**
+- 结论：few-shot 是死路，放弃
+
+**对照实验（意外反杀）**：纯 V6 指令 + 大 max_tokens，默认 temperature：
+
+| 测试 | 结果 |
+|---|---|
+| 单次 | advisor=True, content=12164 字完整代码 |
+| 重复1 | advisor=True, 7943 字, 含代码 |
+| 重复2 | advisor=True, 14419 字, 含代码 |
+| 重复3 | advisor=True, 11453 字, 含代码 |
+
+**结论（最终方案）**：
+1. **V6 指令**（强制 advisor 真咨询 + 完整答案 + 逐字采用）——hook 已内置
+2. **max_tokens ≥ 60000**——防止 reasoning_content 思考吃光额度（之前"空输出"真凶）
+3. **不需要 temperature=0**，默认温度下 3/3 稳定
+4. 无需 few-shot
+
+**使用前提**：客户端（Claude Code / CC Switch）必须保证请求的 max_tokens 足够大（≥60000）。CC Switch 直连时 Claude Code 自动发大值（实测可到 387k）。
