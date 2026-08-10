@@ -65,3 +65,21 @@
 - 空响应的根因（限流 vs 路由器内部错误）未完全定位
 - 更长周期的真实流量命中率待社区数据
 - 是否有隐藏参数（如 `routing` hint）仍未知——目前所有已知参数均无效
+
+## 7. 🚀 决定性发现：max_tokens 与"空响应"真相
+
+**现象**：早期测试中 max_tokens 设 900-2000 时，硬任务频繁"空输出"。
+
+**真相（诊断后）**：step-router-v1 响应含 `reasoning_content`（思考）与 `content`（最终输出）两个字段。当 max_tokens 过小时，**思考先吃光额度**，轮到 content 输出时额度耗尽（`finish_reason=length`）→ 表现为"空输出"。
+
+**关键证据**：
+- `max_tokens=2000` → `finish=length`, `content=''`, `reasoning_content=2000 字思考`（2000 token 全在思考）
+- `max_tokens=30000` → `finish=stop`, `content=9960 字完整实现`, `reasoning=34778 字`（advisor 触发）
+- `max_tokens=100000` → `finish=stop`, `content=17666 字更完整`, `reasoning=708 字`（advisor 触发，含完整 task）
+
+**另一个关键观察**：用户测试 `max_tokens` 可设为 **387k**——接近 pro 引擎的 384K 输出上限（官方文档），而 flash 仅 16K。**能接受超大 max_tokens 本身暗示路由到 pro**（flash 不设这么大的输出上限）。
+
+**结论与对策**：
+1. **"空输出"≠路由器抽风，是 max_tokens 被思考吃光**——之前"偶发空响应"的归因需要修正
+2. 硬任务场景 **max_tokens 应给大（≥30000）**，给思考与内容都留足空间
+3. 配合双通道指令，复杂任务可稳定输出 advisor 真咨询 + 完整实现
