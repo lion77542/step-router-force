@@ -38,16 +38,31 @@
 
 **路由决策 = 一次文本生成**。这是"提示词能影响它"的根本原因——它真的在读你的提示词。
 
-## 2. 两种咨询模式：真咨询 vs 走形式
+## 2. 三种咨询模式：答案型 vs 建议型 vs 走形式
 
-实测观察到 advisor 调用有两种形态：
+实测观察到 advisor 调用有三种形态（随指令强度与任务类型变化）：
 
-| 模式 | 特征 | 触发条件 |
-|---|---|---|
-| **真咨询 (full)** | advisor 块内是完整任务 + 真实专家分析（Markdown 结构、设计要点、代码建议） | 复杂任务 + 强制指令 |
-| **走形式 (symbolic)** | `advice_type=starting_out` + 一句话描述，无实质内容 | 简单任务被判定"不值得咨询"，但路由器仍象征性调用 |
+| 模式 | advisor 块特征 | 最终输出 | 判定 |
+|---|---|---|---|
+| **答案型 (answer)** | 直接给出完整答案文本（`<parameter name="text">` 或直接文本） | executor **100% 逐字复述**（或精简复制） | ✅ **输出 = pro 的内容** |
+| **建议型 (advice)** | 审批 executor 的计划（"I plan to..." / "我计划..."） | executor 自己生成 | ⚠️ 输出 = flash 的内容 |
+| **走形式 (symbolic)** | `advice_type=starting_out` + 一句话描述 | executor 自己生成 | ❌ 无实质内容 |
 
-**走形式模式的 advisor 块是垃圾**——它不代表 pro 干活了。真正有效的验证标准是：advisor 块内是否有实质内容。
+**规律（实测第 13 节）**：
+- **答案型 → 输出即 pro 的内容**（"pro 主力"的真实形态）
+- 建议型/走形式 → flash 自己写（pro 只审批/没参与）
+
+**判断方法（看 advisor 块内开头）**：
+- `<parameter name="text">` / 直接文本 = 答案型（pro 在工作）
+- "I plan to..." / "我计划..." / "I'm the executor..." = 建议型（pro 在审批）
+- `advice_type=starting_out` = 走形式（pro 没干活）
+
+**如何从建议型/走形式压成答案型**（v6/v7 指令的核心目标）：
+- 显式指令："advisor must return the COMPLETE final answer text"
+- 禁止 executor 自写计划："do NOT write your own plan, do NOT ask the advisor to approve your plan"
+- 实测：v6 纯问答 100% 答案型；v7 下问答多为答案型，建议型占比已很低
+
+**把"建议型"进一步压成"答案型"是社区可继续挖掘的方向**——目前答案型在实质任务中占比高，但触发仍有波动。
 
 ## 3. 路由判定依据（官方文档口径）
 
