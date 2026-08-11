@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""step-router-force: Claude Code UserPromptSubmit hook (v7)
+"""step-router-force: Claude Code UserPromptSubmit hook (v8)
 
 仅在 stepfun 供应商(step-router-v1)激活时, 在用户消息末尾附加强制
 "真咨询"指令。其他供应商原样放行, 零影响。
 
+v8 = v7 + 健壮性修复:
+- 修复 v1-v7 潜伏 bug: json.load 失败时 data 未定义 → json.dumps 抛
+  NameError → hook 崩溃 (实测触发: 粘贴超长文本时解析失败)
+- 解析失败时回传原文, 绝不清空用户消息
+- stdout 写入也包 try, 任何异常都不让 hook 崩
+
 v7 指令 (最终版):
 - 纯输出任务: advisor 出完整答案, 逐字采用
-- 工具/代码任务: 先 advisor 完整方案, 再用工具执行 (关键: 逐字约束
-  只对纯输出, 否则路由器判定"要调工具没法逐字"而放弃 advisor -
-  实测 v6 纯逐字版工具任务 0 触发)
+- 工具/代码任务: 先 advisor 完整方案, 再用工具执行
 
-配套参数:
-- max_tokens >= 60000, 否则 reasoning_content 思考吃光额度
-- 默认 temperature 即可 (实测 3/3 advisor+tool_calls)
-
+配套参数: max_tokens >= 60000 (否则 reasoning_content 吃光额度)
 安全: ensure_ascii / 幂等 / 容错 / 日志
 """
 
@@ -59,8 +60,13 @@ def _log(action):
 
 def main():
     action = "passthrough"
+    raw = ""
+    data = {"prompt": ""}
     try:
-        data = json.load(sys.stdin)
+        raw = sys.stdin.read()
+        parsed = json.loads(raw) if raw.strip() else {}
+        if isinstance(parsed, dict):
+            data = parsed
         prompt = data.get("prompt", "")
         if (
             is_stepfun()
@@ -76,10 +82,18 @@ def main():
             action = "skip(already-has)"
     except Exception as exc:
         action = f"error({exc})"
+        # 解析失败时回传原文, 绝不清空用户消息
+        try:
+            data = {"prompt": raw} if raw.strip() else {"prompt": ""}
+        except Exception:
+            data = {"prompt": ""}
 
     _log(action)
 
-    sys.stdout.write(json.dumps(data, ensure_ascii=True))
+    try:
+        sys.stdout.write(json.dumps(data, ensure_ascii=True))
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
