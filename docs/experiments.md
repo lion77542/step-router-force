@@ -205,3 +205,27 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 - 本次触发率 5/5（用户消息级），输出内容来自 pro 的比例 4/5
 
 **总结**：v7 下"pro 主力"的真实形态 = **答案型 consult 时输出即 pro 的内容**。建议型 consult 是剩余的主要提升空间——如何把"建议型"进一步压成"答案型"，是值得社区继续挖掘的方向。
+
+## 14. 🆕 真实环境样本 3：pro 深度分析 + 工具全程（教科书级）
+
+**场景**：用户让分析 sub2api 源码（真实 Claude Code + CC Switch + StepFun + v7/v8 hook）。
+
+**过程还原**：
+1. WebSearch/Fetch 全部不可用（环境限制）→ 用户指路"只有 bash 能用" → 改用 curl 探索 GitHub API
+2. **advisor 4 次全部触发，且全部是答案型**：
+   - #1: 给出探索路径（Bash/Grep 查本地 + GitHub API）
+   - #2: 完整探索攻略——具体到 curl 命令、文件读取优先级、架构假设（"Go 项目几乎肯定是 entry point → router → provider adapters"）
+   - #3: 精准指定要读的文件（router.go / gateway_handler / gateway_service）
+   - #4: 完整源码分析——技术栈、目录结构、核心请求流程、关键特性、支持的上游平台
+3. **最终输出 = advisor 的分析（逐字采用）**——pro 的架构解读直接成为最终回答
+4. 工具调用全程正常（curl 探索、grep 过滤、读取源码）——**advisor 没有挤掉工具能力**
+
+**质量判定**：教科书级成功样本——
+- pro 深度分析（不是"我计划"式建议型，是完整答案型）
+- 工具调用与 advisor 并行成立
+- 中途遇挫（WebSearch/Fetch 挂）能绕道解决（bash curl）——executor 干活能力保留
+- 最终输出质量 = pro 级别（技术栈/架构/流程梳理专业完整）
+
+**结论**：这是"pro 主力 + 工具全程"的最完整验证。实质分析任务中，v7/v8 hook 下 advisor 稳定答案型触发，输出即 pro 内容，工具调用不受影响。
+
+**附：权限模式说明**（与此样本同时确认）——Claude Code 默认 manual 模式下每次工具调用都要确认，与 hook 无关。全自动可 Shift+Tab 切 bypass permissions 或 `--dangerously-skip-permissions`。
