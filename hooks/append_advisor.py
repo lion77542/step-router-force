@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""step-router-force: Claude Code UserPromptSubmit hook (v10)
+"""step-router-force: Claude Code UserPromptSubmit hook (v11)
 
 仅在 stepfun 供应商(step-router-v1)激活时, 在用户消息末尾附加强制
 "真咨询"指令。其他供应商原样放行, 零影响。
 
-v10 = ds 模型更新后的适配 (v9 基础上强化):
-- v9 修复了 "advisor 被当真实工具调用" 的崩溃 (No such tool available)
-- v10 针对 ds 更新后 flash 代码质量骤降: 要求 advisor 直接产出完整
-  可运行代码, flash 只负责"抄写"写入文件, 禁止自己写代码
-  (实测: advisor 方案主导 + write_file 完整写入 2/2)
+v11 = v6(禁止计划审批/必须完整答案/只给建议就再要) + v10(pro出完整
+代码flash只抄写) + 防伪调用(advisor不是工具) 全合并。
 
-配套参数: max_tokens >= 60000 (否则 reasoning_content 吃光额度)
-安全: ensure_ascii / 幂等 / 容错 / 日志
+实测教训:
+- v6 纯输出 100% 答案型, 但工具任务 0 触发 (逐字条款误伤)
+- v10 修了工具任务, 但丢了 v6 的"禁止计划审批"→ 纯输出退回咨询型
+- v11 两全: 纯输出=答案型逐字复述, 代码=advisor完整代码flash抄写
+
+配套参数 (文档级): max_tokens<=250K 建议 128K-200K,
+reasoning_effort=low, 模型名 step-router-v1[256k]
 """
 
 import sys
@@ -24,12 +26,18 @@ from pathlib import Path
 FORCE = (
     "\n\n[ROUTER DIRECTIVE] IMPORTANT: 'advisor' is NOT a callable tool or "
     "agent - do NOT attempt to call, invoke, spawn, or search for it. The "
-    "advisor consultation is performed automatically by the system. For tasks "
-    "that require writing code: the advisor MUST produce the COMPLETE final "
-    "code, ready to run, in its consultation. You must NOT write any code "
-    "yourself - wait for the advisor's complete code, then write it to files "
-    "EXACTLY as provided using your tools. For pure output tasks, reproduce "
-    "the advisor's answer word for word. Applies to every request."
+    "advisor consultation is performed automatically by the system. "
+    "For EVERY request: pass the user's message VERBATIM as the advisor's "
+    "task - do NOT summarize it, do NOT write your own plan, do NOT ask the "
+    "advisor to approve your plan. The advisor MUST return the COMPLETE final "
+    "answer text. "
+    "For pure output tasks: your reply MUST BE the advisor's complete answer, "
+    "word for word. "
+    "For tasks requiring code: the advisor MUST produce the COMPLETE final "
+    "code, ready to run; you must NOT write any code yourself - write it to "
+    "files EXACTLY as provided using your tools. "
+    "If the advisor only gives you advice, ask it again for the complete "
+    "answer. Applies to every request."
 )
 
 LOG_PATH = Path(os.environ.get(
