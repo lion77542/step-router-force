@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""step-router-force: Claude Code UserPromptSubmit hook (v8)
+"""step-router-force: Claude Code UserPromptSubmit hook (v9)
 
 仅在 stepfun 供应商(step-router-v1)激活时, 在用户消息末尾附加强制
 "真咨询"指令。其他供应商原样放行, 零影响。
 
-v8 = v7 + 健壮性修复:
-- 修复 v1-v7 潜伏 bug: json.load 失败时 data 未定义 → json.dumps 抛
-  NameError → hook 崩溃 (实测触发: 粘贴超长文本时解析失败)
-- 解析失败时回传原文, 绝不清空用户消息
-- stdout 写入也包 try, 任何异常都不让 hook 崩
+v9 = 修复 v7/v8 重大缺陷: 指令里 "call the advisor function" 诱导
+executor 把 advisor 当真实工具调用 → "No such tool available: advisor"
+报错 → 放弃咨询 → flash 独自写代码(实测 bug 频出)。
 
-v7 指令 (最终版):
-- 纯输出任务: advisor 出完整答案, 逐字采用
-- 工具/代码任务: 先 advisor 完整方案, 再用工具执行
+v9 关键修正:
+- 明确 "advisor 不是可调用工具, 不要调用/搜索/派生它, 会失败"
+- 咨询是系统自动完成的: executor 只需在回复中显式请求咨询,
+  系统会在下一轮返回 advisor 指引; 未返回则再请求一次
+- 收到指引前不写最终答案; 指引到达后: 纯输出任务逐字复述,
+  工具/代码任务先拿完整方案再执行
 
 配套参数: max_tokens >= 60000 (否则 reasoning_content 吃光额度)
 安全: ensure_ascii / 幂等 / 容错 / 日志
@@ -26,13 +27,16 @@ import time
 from pathlib import Path
 
 FORCE = (
-    "\n\n[ROUTER DIRECTIVE] Before answering, you MUST consult the advisor. "
-    "CRITICAL: pass the user's message VERBATIM as the advisor's task - do NOT "
-    "summarize it, do NOT write your own plan, do NOT ask the advisor to approve "
-    "your plan. The advisor must return the COMPLETE final answer text. "
-    "Your reply MUST BE the advisor's complete answer, word for word. "
-    "If the task requires writing code or files, first get the advisor's complete "
-    "solution, then write the files using your tools."
+    "\n\n[ROUTER DIRECTIVE] IMPORTANT: 'advisor' is NOT a callable tool or "
+    "agent - do NOT attempt to call, invoke, spawn, or search for it; any such "
+    "attempt will fail. The advisor consultation is performed automatically by "
+    "the system. Before answering every request: explicitly request the advisor "
+    "consultation in your response text, and do not produce the final answer "
+    "until the system has returned the advisor's guidance (if it is not "
+    "returned, request it once more). Base your final answer on the advisor's "
+    "complete guidance: for pure output tasks reproduce it word for word; for "
+    "tasks requiring tools or code, first obtain the advisor's complete "
+    "solution, then execute it with your tools. Applies to every request."
 )
 
 LOG_PATH = Path(os.environ.get(
@@ -82,7 +86,6 @@ def main():
             action = "skip(already-has)"
     except Exception as exc:
         action = f"error({exc})"
-        # 解析失败时回传原文, 绝不清空用户消息
         try:
             data = {"prompt": raw} if raw.strip() else {"prompt": ""}
         except Exception:
