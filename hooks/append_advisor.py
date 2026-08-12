@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""step-router-force: Claude Code UserPromptSubmit hook (v9)
+"""step-router-force: Claude Code UserPromptSubmit hook (v10)
 
 仅在 stepfun 供应商(step-router-v1)激活时, 在用户消息末尾附加强制
 "真咨询"指令。其他供应商原样放行, 零影响。
 
-v9 = 修复 v7/v8 重大缺陷: 指令里 "call the advisor function" 诱导
-executor 把 advisor 当真实工具调用 → "No such tool available: advisor"
-报错 → 放弃咨询 → flash 独自写代码(实测 bug 频出)。
-
-v9 关键修正:
-- 明确 "advisor 不是可调用工具, 不要调用/搜索/派生它, 会失败"
-- 咨询是系统自动完成的: executor 只需在回复中显式请求咨询,
-  系统会在下一轮返回 advisor 指引; 未返回则再请求一次
-- 收到指引前不写最终答案; 指引到达后: 纯输出任务逐字复述,
-  工具/代码任务先拿完整方案再执行
+v10 = ds 模型更新后的适配 (v9 基础上强化):
+- v9 修复了 "advisor 被当真实工具调用" 的崩溃 (No such tool available)
+- v10 针对 ds 更新后 flash 代码质量骤降: 要求 advisor 直接产出完整
+  可运行代码, flash 只负责"抄写"写入文件, 禁止自己写代码
+  (实测: advisor 方案主导 + write_file 完整写入 2/2)
 
 配套参数: max_tokens >= 60000 (否则 reasoning_content 吃光额度)
 安全: ensure_ascii / 幂等 / 容错 / 日志
@@ -28,15 +23,13 @@ from pathlib import Path
 
 FORCE = (
     "\n\n[ROUTER DIRECTIVE] IMPORTANT: 'advisor' is NOT a callable tool or "
-    "agent - do NOT attempt to call, invoke, spawn, or search for it; any such "
-    "attempt will fail. The advisor consultation is performed automatically by "
-    "the system. Before answering every request: explicitly request the advisor "
-    "consultation in your response text, and do not produce the final answer "
-    "until the system has returned the advisor's guidance (if it is not "
-    "returned, request it once more). Base your final answer on the advisor's "
-    "complete guidance: for pure output tasks reproduce it word for word; for "
-    "tasks requiring tools or code, first obtain the advisor's complete "
-    "solution, then execute it with your tools. Applies to every request."
+    "agent - do NOT attempt to call, invoke, spawn, or search for it. The "
+    "advisor consultation is performed automatically by the system. For tasks "
+    "that require writing code: the advisor MUST produce the COMPLETE final "
+    "code, ready to run, in its consultation. You must NOT write any code "
+    "yourself - wait for the advisor's complete code, then write it to files "
+    "EXACTLY as provided using your tools. For pure output tasks, reproduce "
+    "the advisor's answer word for word. Applies to every request."
 )
 
 LOG_PATH = Path(os.environ.get(
