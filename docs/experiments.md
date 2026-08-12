@@ -229,3 +229,23 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 **结论**：这是"pro 主力 + 工具全程"的最完整验证。实质分析任务中，v7/v8 hook 下 advisor 稳定答案型触发，输出即 pro 内容，工具调用不受影响。
 
 **附：权限模式说明**（与此样本同时确认）——Claude Code 默认 manual 模式下每次工具调用都要确认，与 hook 无关。全自动可 Shift+Tab 切 bypass permissions 或 `--dangerously-skip-permissions`。
+
+## 15. 🆕 ds 模型更新后的适配：v10 指令（pro 写代码，flash 只抄写）
+
+**背景**：用户反馈 ds（step-router 背后引擎）更新后"原来的都失效了"。实测诊断：
+- hook 注入正常（15 次 inject）
+- advisor 触发正常（10/10，全答案型）
+- **真正失效点：flash 作为"代码作者"写的代码 bug 密度骤增**（`y is not defined`、`getBlockColors` 颜色全 undefined、AO 偏移等），advisor 只能"审查指出"，修了一个又冒一个 → 永远修不完
+
+**根因**：v7/v8 的"先 advisor 方案再工具执行"在 ds 更新后退化成了"flash 先写 → pro 审查"模式。pro 变成修理工而不是设计师。
+
+**v10 指令修复**（核心：把 flash 从"作者"降级为"抄写员"）：
+> For tasks that require writing code: the advisor MUST produce the COMPLETE final code, ready to run, in its consultation. You must NOT write any code yourself - wait for the advisor's complete code, then write it to files EXACTLY as provided using your tools.
+
+**实测（v10 + 新版 ds）**：
+| 测试 | advisor | tool_call | 写入代码 |
+|---|---|---|---|
+| 第1次 | ✅ | write_file | 2754 字含函数 |
+| 第2次 | ✅ | write_file | 8140 字完整实现 |
+
+**注意**：pro 的方案主导 + flash 照抄，代码完整性优于"flash 自写 pro 审查"模式（不再有低级 bug 海），但"含测试=False"说明 flash 仍会删减 pro 方案——**完整度仍受 flash 抄写能力限制**。进一步压榨空间：让 advisor 方案更具体到可直接落盘（社区可继续挖掘）。
