@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""step-router-force: Claude Code UserPromptSubmit hook (v11)
+"""step-router-force: Claude Code UserPromptSubmit hook (v11.1)
 
 仅在 stepfun 供应商(step-router-v1)激活时, 在用户消息末尾附加强制
 "真咨询"指令。其他供应商原样放行, 零影响。
@@ -34,7 +34,7 @@ FORCE = (
     "For pure output tasks: your reply MUST BE the advisor's complete answer, "
     "word for word. "
     "For tasks requiring code: the advisor MUST produce the COMPLETE final "
-    "code, ready to run; you must NOT write any code yourself - write it to "
+    "code INCLUDING unit tests, ready to run; you must NOT write any code yourself - write it to "
     "files EXACTLY as provided using your tools. "
     "If the advisor only gives you advice, ask it again for the complete "
     "answer. Applies to every request."

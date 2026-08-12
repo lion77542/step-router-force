@@ -249,3 +249,25 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 | 第2次 | ✅ | write_file | 8140 字完整实现 |
 
 **注意**：pro 的方案主导 + flash 照抄，代码完整性优于"flash 自写 pro 审查"模式（不再有低级 bug 海），但"含测试=False"说明 flash 仍会删减 pro 方案——**完整度仍受 flash 抄写能力限制**。进一步压榨空间：让 advisor 方案更具体到可直接落盘（社区可继续挖掘）。
+
+## 16. 🆕 v11 最终形态 + 稳定性/参数验证
+
+**v11 = v6(禁止计划审批/必须完整答案/再要一次) + v10(pro代码flash抄写) + 防伪调用 全合并**
+
+**关键理解（推翻之前的误判）**：advisor 块出现 = pro 参与决策；"你好吗"等简单任务不触发 advisor = **正确行为**（闲聊不需要 pro）。复杂任务 advisor 触发 + 代码完整 = pro 主力。
+
+**稳定性验证（v11 + max_tokens=200000 + reasoning_effort=low）**：
+| 测试 | 结果 |
+|---|---|
+| 3连测 | advisor 3/3 + 工具调用 3/3 + 代码 3111-14591字 ✅ |
+| effort=low/medium/high | 三档均触发 advisor + 代码 4/5 质量 |
+
+**v11.1 优化**（指令加 "INCLUDING unit tests"）：
+- 单次请求产出 12979 字完整代码（实现+测试同文件）
+- 结论："缺测试"是单次输出截断，非质量缺失
+
+**参数结论（最终）**：
+- `max_tokens: 200000`（≤250K 官方上限，pro 深度模式阈值之上）
+- `reasoning_effort: low`（压 reasoning 长度，防吃光额度）
+- 模型名 `step-router-v1[256k]`（精确声明，防 context_length_exceeded）
+- `temperature: 0.2`（轻度稳定）
