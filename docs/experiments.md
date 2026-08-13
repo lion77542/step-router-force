@@ -290,3 +290,18 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 3. 之前 Workflow 子代理报"review 形态"是**不可靠结果**（子代理模型挂了），主循环直测推翻
 
 **建议参数（ultracode 兼容）**：max_tokens=200000 + reasoning_effort=high + thinking.budget_tokens=8000
+
+## 18. 🆕 最终方案：SessionStart system 注入（v11.1 全链路）
+
+**为什么之前不行**：UserPromptSubmit 只能改用户消息（低权重），指令被 Claude Code 身份指令稀释 → executor 退回"咨询型"（把计划发给 advisor 问行不行）。
+
+**破局**：SessionStart hook 的 `hookSpecificOutput.additionalContext` 注入 **system 通道**（与 Claude Code 身份指令同区，权重对等）→ 路由器无法无视。且脚本带供应商判断（is_stepfun），非 StepFun 环境零注入——比 CLAUDE.md 精准（CLAUDE.md 不分供应商）。
+
+**最终链路（三步全锁定）**：
+1. **SessionStart hook**（session_start.py）：system 注入 v11.1 指令（仅 StepFun 环境）
+2. **UserPromptSubmit hook**（append_advisor.py v11.1）：消息通道兜底
+3. **Body 覆盖**（CC Switch 本地代理接管）：max_tokens=200000, reasoning_effort=high, thinking.budget_tokens=8000, temperature=0.2
+
+**实测参数**（第 17 节）：thinking budget=8000 + effort high → advisor answer 形态 + code 13860字 五项全满。
+
+**全局 CLAUDE.md 已删除**——不再用全局文件，避免误导其他供应商/用户。
