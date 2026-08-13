@@ -305,3 +305,29 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 **实测参数**（第 17 节）：thinking budget=8000 + effort high → advisor answer 形态 + code 13860字 五项全满。
 
 **全局 CLAUDE.md 已删除**——不再用全局文件，避免误导其他供应商/用户。
+
+## 19. 🆕 决定性方案：双协议代理（修复 `400 convert fail: 'name'`）
+
+**背景**：把 CC Switch 的 StepFun 请求地址指向自建代理（`proxy/stepfun_proxy.py`）后，第一个请求即报 `400 convert fail: 'name'`。
+
+**真相**：CC Switch 按 **OpenAI Chat Completions 格式**转发请求，其 `tools` 是 `{"type":"function","function":{"name":...}}` 嵌套形状；v1 代理按 Anthropic 平铺形状取 `t['name']` → KeyError 裸崩。
+
+**v2 修复**：
+1. **双协议检测**：顶层有 `system` 字段 = Anthropic 格式（Claude Code 恒有）；否则 = OpenAI 格式。两条转换路径各自独立
+2. **OpenAI 路径**：请求直通（tools/tool_calls/tool_choice 原样保留，本来就是 stepfun 原生协议）+ DIRECTIVE 注入第一条 system + 决策点插最后 user 前 + 强制参数
+3. **全 `.get()` 防御**：tool_use 缺 name、content 为 null、tool_choice 为 dict、非字典块……一切畸形输入不再裸崩
+4. **错误落盘**：convert 失败时原始请求写入 `G:\steprouter\proxy_last_error.json`，可离线诊断
+5. **max_tokens 自动钳制**：`min(max(v,200000),250000)`——CC Switch 默认发 387k，超官方上限，直接封顶 250k
+6. **流式**：OpenAI 请求 SSE 原样透传；Anthropic 格式请求兜底单事件输出
+
+**实测（v2 + 真实 step_plan API，崩溃请求形状原样重放）**：
+
+| 指标 | 结果 |
+|---|---|
+| 状态码 | 200（33s，不再 400）✅ |
+| advisor | 触发，**答案型**（完整实现方案：OrderedDict 数据结构、TTL 过期设计）✅ |
+| 工具调用 | `Write -> ttl_lru_cache.py`（pro 给方案 → executor 落盘）✅ |
+| 响应格式 | OpenAI Chat Completions 原样 ✅ |
+| 流式 | SSE 20 条 data 事件 + `[DONE]` 正常透传 ✅ |
+
+**结论**：代理是控制链路的**最后一层**——hook 管不住的地方（请求层），代理直接改请求。双协议支持让 CC Switch 无论配 OpenAI 还是 Anthropic 格式都能工作。自测 16/16（含崩溃复现、多轮 tool role、防御边界）。

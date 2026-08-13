@@ -89,6 +89,21 @@ any question, no matter how simple. Hard rule, applies to every request.
 - 实质任务响应里应出现 `[Advisor consultation` 块
 - 命中率统计：`python ~/.claude/hooks/advisor_stats.py`
 
+## 代理方案（请求层强制，最强控制）
+
+hook 管的是"消息内容"，代理管的是"请求本身"。`proxy/stepfun_proxy.py` 是自建本地代理（Claude Code → CC Switch → 本代理 → StepFun），在**请求层**做三件事：
+
+1. DIRECTIVE 注入为第一条 system 消息（最高权重位置）+ 最后一条 user 消息前插决策点（双通道，比 hook 更硬）
+2. 强制 `model=step-router-v1`、`max_tokens∈[200k,250k]`、`reasoning_effort=high`、`thinking.budget_tokens=8000`、`temperature=0.2`
+3. **双协议兼容**（CC Switch 配 OpenAI 或 Anthropic 格式都能用；OpenAI 格式 tools 嵌套形状不再崩——修复见 experiments 第 19 节）
+
+```bash
+python proxy/stepfun_proxy.py            # 默认 127.0.0.1:18731
+python proxy/stepfun_proxy.py --selftest # 离线自测 16 项
+```
+
+然后 CC Switch 的 StepFun 供应商**请求地址**改成 `http://127.0.0.1:18731` 即可。代理日志写 `stepfun_proxy.log`，出错时原始请求落盘 `proxy_last_error.json`，可离线诊断。
+
 ## 通用接入（不限于 Claude Code）
 
 **原理与 Claude Code 无关**——任何能把"强制咨询指令"送进请求的客户端、中转站、代理都能用：

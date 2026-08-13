@@ -1,0 +1,14 @@
+# 凭据与密钥 - 绝不提交
+.env
+*.key
+*.pem
+
+# 本地运行产物
+*.log
+proxy_last_error.json
+__pycache__/
+*.pyc
+
+# 编辑器
+.vscode/
+.idea/
