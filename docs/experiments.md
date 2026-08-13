@@ -271,3 +271,22 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 - `reasoning_effort: low`（压 reasoning 长度，防吃光额度）
 - 模型名 `step-router-v1[256k]`（精确声明，防 context_length_exceeded）
 - `temperature: 0.2`（轻度稳定）
+
+## 17. 🆕 ultracode 模式兼容验证（thinking + effort high）
+
+**背景**：用户要求开了 `/effort ultracode`（thinking enabled + effort high）也要 pro 主力。
+
+**实测（v11 指令 + max_tokens=200000）**：
+| 配置 | advisor | 形态 | code | 质量 |
+|---|---|---|---|---|
+| thinking budget=20000 + effort high | ✅ | answer | 6901字 | 缺test |
+| thinking budget=20000 + effort high + 250k | ✅ | answer | 4059字 | 缺test |
+| 无 thinking + effort low | ✅ | answer | 13311字 | 五项全满 |
+| **thinking budget=8000 + effort high** | ✅ | **answer** | **13860字** | **五项全满** ✅ |
+
+**结论**：
+1. **ultracode 模式（thinking+effort high）不阻止 pro 主力**——advisor 形态为 answer（pro 直接拆解任务给完整方案），非审查型
+2. **thinking budget 是质量开关**：20000 吃太多额度挤掉测试；**8000 是甜点**（code 13860字 五项全满）
+3. 之前 Workflow 子代理报"review 形态"是**不可靠结果**（子代理模型挂了），主循环直测推翻
+
+**建议参数（ultracode 兼容）**：max_tokens=200000 + reasoning_effort=high + thinking.budget_tokens=8000
