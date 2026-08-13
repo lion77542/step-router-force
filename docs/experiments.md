@@ -331,3 +331,24 @@ executor(flash) 先写完整实现 → advisor(pro) 审查代码指出具体问�
 | 流式 | SSE 20 条 data 事件 + `[DONE]` 正常透传 ✅ |
 
 **结论**：代理是控制链路的**最后一层**——hook 管不住的地方（请求层），代理直接改请求。双协议支持让 CC Switch 无论配 OpenAI 还是 Anthropic 格式都能工作。自测 16/16（含崩溃复现、多轮 tool role、防御边界）。
+
+## 20. 🆕 2026-08-14：effort 恢复 high + DIRECTIVE 反建议型强化
+
+**背景**：用户反馈"pro 还是不是主力，像咨询比较多"。审查发现：§4.7 期间为防"卡死"把 effort 改成 low，但终局归因证明卡死=上游饥饿、与 effort 无关；且用户明确要求"advisor 必须 high 思考"。
+
+**改动**（proxy 请求层）：
+1. `reasoning_effort` 恢复 **high**（实验17 ultracode 兼容参数，thinking 8000 保留；新增 `STEPFUN_EFFORT` 环境变量可调）
+2. DIRECTIVE 加 **PRIMARY ENGINE 条款**：advisor 必须深度思考并直接返回完整答案文本——禁止 plan/proposal/review/"I plan to"/"我计划" 式建议
+3. DIRECTIVE 加**反建议回退**：若 advisor 输出是建议/审查而非完整答案，executor 视为失败、再次索取完整答案
+4. DECISION 决策点同步强化（"not a review of your plan"）
+
+**实测（真实 step_plan API，同一 LRU 任务）**：
+
+| 配置 | advisor | 输出 | 工具调用 | 耗时 |
+|---|---|---|---|---|
+| effort=low + 旧 DIRECTIVE（8-13） | 答案型 | 1963 字 | 1×Write | 33.6s |
+| **effort=high + 新 DIRECTIVE（8-14）** | **答案型** | **2474 字（+26%）** | 1×Write | 35.3s |
+
+**结论**：effort=high 恢复后输出完整度提升（思考额度更多），答案型保持、工具调用不受影响。"pro 主力"在 router 模式下的真实形态 = **答案型 consult（输出即 pro 内容）+ executor 抄写落盘**；建议型比例是持续压榨空间（本次 DIRECTIVE 强化是针对该方向的第二轮尝试，需更多真实样本统计答案型比例）。
+
+**安全修复（同会话）**：仓库 proxy 曾硬编码 API Key 并推送公开仓库 → 已移除 + amend + force push 清理，新增 .gitignore。**教训：公开仓库版本必须用 STEPFUN_KEY 环境变量，绝不硬编码凭据**。
