@@ -26,6 +26,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -75,6 +76,77 @@ DECISION = (
     "for its COMPLETE answer - not a review of your plan. The advisor's "
     "complete answer IS your answer, verbatim."
 )
+
+# ---- pro 主力保险: 建议型/未触发检测 + 自动重试 ----
+# 原理: 提示词压概率有天花板; 代理在响应层检测 advisor 形态,
+# 若是"建议型"(advisor 只审批计划 -> 输出=flash 内容)或根本没触发,
+# 自动追加指令重试, 把"答案型"(输出=pro 内容)从概率变成兜底保证。
+RETRY_ADVICE = (
+    "[RETRY DIRECTIVE] PREVIOUS ATTEMPT FAILED: the advisor returned only "
+    "advice/a plan/review instead of the COMPLETE final answer. Try again: "
+    "pass the user's latest message VERBATIM as the advisor's task and REQUIRE "
+    "the advisor's COMPLETE final answer text directly. Do not accept advice "
+    "or a plan as the answer. Do not write your own answer."
+)
+
+RETRY_CONSULT = (
+    "[RETRY DIRECTIVE] PREVIOUS ATTEMPT FAILED: you answered WITHOUT the "
+    "advisor consultation. The advisor consultation is MANDATORY for this "
+    "request. Consult the advisor NOW with the user's message verbatim and "
+    "return its COMPLETE answer."
+)
+
+ADVICE_MARKERS = (
+    "i plan to", "my plan", "here's my plan", "does this approach look good",
+    "do you approve", "please approve", "i'm the executor", "i'm about to",
+    "my approach", "let me know if", "i'd like your feedback",
+    "我计划", "我的计划", "计划如下", "我打算", "这个方案行不行", "请您审批", "请审批",
+)
+
+ANSWER_MARKERS = (
+    "```", "def ", "class ", "import ", "complete", "完整", "```python",
+    "```java", "```js", "```ts", "```html", "```css",
+)
+
+
+def extract_advisor_block(content):
+    if not content:
+        return None
+    m = re.search(r'\[Advisor consultation[^\]]*\](.*?)(?:\[End of advisor consultation|$)',
+                  content, re.S)
+    return m.group(1) if m else None
+
+
+def is_advice_form(content):
+    """True = advisor 块是建议型(只有计划/审批, 无完整答案) -> 需重试"""
+    block = extract_advisor_block(content)
+    if block is None:
+        return False
+    low = block.lower()
+    has_advice = any(mk in low for mk in ADVICE_MARKERS)
+    has_answer = any(mk in low for mk in ANSWER_MARKERS)
+    return has_advice and not has_answer
+
+
+def has_advisor(content):
+    return extract_advisor_block(content) is not None
+
+
+def sse_extract_content(raw):
+    """从 SSE 流原始字节中拼接 delta content, 用于形态检测"""
+    parts = []
+    text = raw.decode('utf-8', 'ignore')
+    for line in text.splitlines():
+        if line.startswith('data:') and '[DONE]' not in line:
+            try:
+                j = json.loads(line[5:].strip())
+                delta = (j.get('choices') or [{}])[0].get('delta') or {}
+                if delta.get('content'):
+                    parts.append(delta['content'])
+            except Exception:
+                pass
+    return ''.join(parts)
+
 
 PRO_DIRECTIVE = (
     "You are deepseek-v4-pro, a powerful large reasoning model, responding "
@@ -437,28 +509,57 @@ class H(BaseHTTPRequestHandler):
         headers = {"Authorization": "Bearer " + KEY, "Content-Type": "application/json"}
         up_stream = bool(oreq.get('stream'))
         try:
-            if up_stream and not anth:
-                # OpenAI 流式: 原样转发 SSE
+            if not anth:
+                # OpenAI 路径: 缓冲 + 形态检测 + 建议型/未触发自动重试 (pro 主力保险)
                 t0 = time.time()
-                resp = requests.post(UPSTREAM, headers=headers, json=oreq,
-                                     stream=True, timeout=UPSTREAM_TIMEOUT)
-                if resp.status_code != 200:
-                    log("RESP %s in %.1fs (openai stream)" % (resp.status_code, time.time() - t0))
-                    self._json(502, {"type": "error", "error": {"message":
-                                "upstream %s: %s" % (resp.status_code, resp.text[:300])}})
-                    return
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/event-stream')
-                self.send_header('Cache-Control', 'no-cache')
-                self.send_header('Connection', 'close')
-                self.end_headers()
-                for chunk in resp.iter_content(8192):
+                msgs = list(oreq.get('messages') or [])
+                raw = None
+                d = None
+                retried = 0
+                for attempt in range(3):  # 最多 3 次尝试(1次原始 + 2次重试)
+                    req = dict(oreq)
+                    req['messages'] = msgs
+                    req['stream'] = up_stream
+                    resp = requests.post(UPSTREAM, headers=headers, json=req,
+                                         stream=up_stream, timeout=UPSTREAM_TIMEOUT)
+                    if resp.status_code != 200:
+                        log("RESP %s in %.1fs (openai)" % (resp.status_code, time.time() - t0))
+                        self._json(502, {"type": "error", "error": {"message":
+                                    "upstream %s: %s" % (resp.status_code, resp.text[:300])}})
+                        return
+                    if up_stream:
+                        raw = b''.join(resp.iter_content(8192))
+                        content = sse_extract_content(raw)
+                    else:
+                        d = resp.json()
+                        content = ((d.get('choices') or [{}])[0].get('message') or {}).get('content') or ''
+                    # 形态判定: 闲聊不重试; 建议型/未触发 -> 追加指令重试
+                    reason = None
+                    if not is_trivial(msgs):
+                        if is_advice_form(content):
+                            reason = RETRY_ADVICE
+                        elif not has_advisor(content):
+                            reason = RETRY_CONSULT
+                    if reason is None or attempt == 2:
+                        break
+                    retried += 1
+                    log("RETRY %d/2: %s" % (retried, 'advice-form' if reason == RETRY_ADVICE else 'no-consult'))
+                    msgs = msgs + [{"role": "system", "content": reason}]
+                if up_stream:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/event-stream')
+                    self.send_header('Cache-Control', 'no-cache')
+                    self.send_header('Connection', 'close')
+                    self.end_headers()
                     try:
-                        self.wfile.write(chunk)
+                        self.wfile.write(raw)
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                        break
-                log("RESP 200 in %.1fs (openai stream SSE)" % (time.time() - t0))
+                        pass
+                    log("RESP 200 in %.1fs (openai stream SSE%s)" % (time.time() - t0, ", retried=%d" % retried if retried else ""))
+                else:
+                    log("RESP 200 in %.1fs (openai non-stream%s)" % (time.time() - t0, ", retried=%d" % retried if retried else ""))
+                    self._json(200, d)
                 return
             oreq = dict(oreq)
             if up_stream:
@@ -648,6 +749,50 @@ def selftest2():
     return ok == total
 
 
+def selftest3():
+    """pro 主力保险: 建议型/未触发检测 离线测试"""
+    ok = total = 0
+
+    def check(name, cond):
+        nonlocal ok, total
+        total += 1
+        print(("PASS  " if cond else "FAIL  ") + name)
+        if cond:
+            ok += 1
+
+    # 建议型: advisor 只审批计划
+    advice = "[Advisor consultation #1]\n[Advisor review]\n\nI plan to write an LRU cache. Does this approach look good?\n[End of advisor consultation #1]"
+    check("advice: is_advice_form True", is_advice_form(advice))
+    check("advice: has_advisor True", has_advisor(advice))
+
+    # 答案型: advisor 直接给完整代码
+    answer = "[Advisor consultation #1]\n[Advisor review]\n```python\ndef lru_cache():\n    pass\n```\n完整实现如上\n[End of advisor consultation #1]"
+    check("answer: is_advice_form False", not is_advice_form(answer))
+    check("answer: has_advisor True", has_advisor(answer))
+
+    # 未触发: 无 advisor 块
+    plain = "我直接回答你这个问题。"
+    check("no-consult: is_advice_form False", not is_advice_form(plain))
+    check("no-consult: has_advisor False", not has_advisor(plain))
+
+    # 中文建议型
+    cadvice = "[Advisor consultation #1]\n[Advisor review]\n我计划用 OrderedDict 实现，方案如下，请审批。\n[End of advisor consultation #1]"
+    check("cadvice: is_advice_form True", is_advice_form(cadvice))
+
+    # 混合: 有建议也有代码 -> 不算建议型(保守不重试)
+    mixed = "[Advisor consultation #1]\n[Advisor review]\n我的计划是用 OrderedDict。\n```python\nimport collections\n```\n[End of advisor consultation #1]"
+    check("mixed: is_advice_form False", not is_advice_form(mixed))
+
+    # sse 解析
+    raw = (b'data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n'
+           b'data: {"choices":[{"delta":{"content":"world"}}]}\n\n'
+           b'data: [DONE]\n\n')
+    check("sse: extract content", sse_extract_content(raw) == "Hello world")
+
+    print("selftest3: %d/%d passed" % (ok, total))
+    return ok == total
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=18731)
@@ -656,7 +801,7 @@ if __name__ == '__main__':
     ap.add_argument('--selftest', action='store_true')
     args = ap.parse_args()
     if args.selftest:
-        sys.exit(0 if (selftest() and selftest2()) else 1)
+        sys.exit(0 if (selftest() and selftest2() and selftest3()) else 1)
     MODE = args.mode
     log("stepfun_proxy v2 启动: http://127.0.0.1:%s -> %s (双协议, mode=%s)" % (args.port, UPSTREAM, MODE))
     if MODE == 'pro':
